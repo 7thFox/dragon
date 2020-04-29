@@ -1,6 +1,6 @@
 import dragon
 
-class AParser(dragon.Parser):
+class AParser(dragon.NodeParser):
 
     def Start(self):
         children = {
@@ -10,7 +10,7 @@ class AParser(dragon.Parser):
         }[self.tokens[self.lookahead]]()
         return dragon.node("S", children)
 
-class BParser(dragon.Parser):
+class BParser(dragon.NodeParser):
 
     def Start(self):
         if len(self.tokens) == self.lookahead or self.tokens[self.lookahead] != '(':
@@ -18,7 +18,7 @@ class BParser(dragon.Parser):
         return dragon.node("S", [self.match('('), self.Start(), self.match(')'), self.Start()])
 
 
-class CParser(dragon.Parser):
+class CParser(dragon.NodeParser):
 
     def Start(self):
         return dragon.node("S", [self.match('0'), self.R(), self.match('1')])

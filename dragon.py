@@ -13,7 +13,7 @@ class Parser(ABC):
         if self.tokens[self.lookahead] != c:
             raise Exception("Parse Error: expected " + c)
         self.lookahead += 1
-        return node(c)
+        return self.MatchReturn(c)
 
     def parse(self, tokens):
         self.tokens = tokens
@@ -21,7 +21,25 @@ class Parser(ABC):
         ret = self.Start()
         if len(self.tokens) != self.lookahead:
             raise Exception("Unexpected token " + self.tokens[self.lookahead])
+        return ret
 
+    def peek(self):
+        if len(self.tokens) == self.lookahead:
+            return None
+        return self.tokens[self.lookahead]
+
+    def unexpected_token(self, token):
+        raise Exception("Syntax Error: Unexpected token " + token)
+
+    
     @abstractmethod
     def Start(self):
         pass
+
+    @abstractmethod
+    def MatchReturn(self, c):
+        pass
+
+class NodeParser(Parser):
+    def MatchReturn(self, c):
+        return node(c)
