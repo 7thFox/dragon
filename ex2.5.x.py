@@ -1,6 +1,8 @@
 from enum import Enum, auto
 from io import TextIOWrapper, BytesIO
 
+# Yeah there's some good bugs in here, including that I'm not acutally handling comments...
+
 Keywords = {
     "true",
     "false",
