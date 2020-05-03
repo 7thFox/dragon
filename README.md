@@ -1,2 +1,2 @@
 # dragon
-Some selected solutions to the classic "Dragon Book" written in python
+Some solutions and code based on the classic "Dragon Book" written in python
