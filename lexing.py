@@ -3,6 +3,9 @@ from enum import Enum
 
 # Buffer class for lexing based on the disucssions within CH 3
 
+# You could have up to N*2 in size for tokens, but it's only garunteed
+# for N (we could do something to allow N+1, but really they shouldn't
+# even approch the buffer size)
 _BUFFER_SIZE = 4096
 EOF = "<EOF>"
 
@@ -51,85 +54,80 @@ class Span:
 
 
 class LexingBuffer:
+    class _State:
+        def __init__(self, lines=0, cols=0, chars=0, buffer_number=0, pos=0):
+            self.lines = lines
+            self.cols = cols
+            self.chars = chars
+            self.buffer_number = buffer_number
+            self.pos = pos
+
+        def move_next(self, is_newline):
+            buffer_number = self.buffer_number
+            pos = self.pos + 1
+            if self.pos == _BUFFER_SIZE - 1:  # end of current buffer
+                buffer_number = (buffer_number + 1) % 2
+                pos = 0
+            if is_newline:
+                return LexingBuffer._State(self.lines + 1, 0, self.chars + 1, buffer_number, pos)
+            return LexingBuffer._State(self.lines, self.cols + 1, self.chars + 1, buffer_number, pos)
 
     def __init__(self, text_buffer):
-        assert isinstance(text_buffer, TextIOWrapper)
+        assert isinstance(
+            text_buffer, TextIOWrapper), "Buffer not of TextIOWrapper"
         self._text_buffer = text_buffer
         self.is_EOF = False
-        self._lines = 0
-        self._cols = 0
-        self._chars = 0
-        self._start = (0, 0)
-        self._forward = (0, -1)
-        self._line_col_char_start = (0, 0, 0)
-        self._forward_behind_start = True
-
+        self._states = []
+        self._next_state = LexingBuffer._State()
         self._buffers = [self._read_buffer(), None]
 
     def _read_buffer(self):
-        assert not self.is_EOF
+        assert not self.is_EOF, "Buffer read after EOF"
         ret = [c for c in self._text_buffer.read(_BUFFER_SIZE)]
         if len(ret) < _BUFFER_SIZE:
             ret.append(EOF)
             self.is_EOF = True
         return ret
 
-    def _get_next_forward(self):
-        if self._forward[1] == _BUFFER_SIZE - 1:  # End of current buffer
-            # Ensure we're not reading over the buffer of Start
-            if not self._forward_behind_start and self._forward[0] != self._start[0]:
-                raise Exception("lexeme extending past 2x buffer")
-            other_buffer_index = (self._forward[0] + 1) % 2
-            if self._buffers[other_buffer_index] == None:  # not peeked and already read
-                self._buffers[other_buffer_index] = self._read_buffer()
-            self._forward_behind_start = False
-            return (other_buffer_index, 0)
-        self._forward_behind_start = False
-        return (self._forward[0], self._forward[1]+1)
-
-    def peek(self):
-        new_forward = self._get_next_forward()
-        return self._buffers[new_forward[0]][new_forward[1]]
-
     def read(self):
-        self._forward = self._get_next_forward()
-        val = self._buffers[self._forward[0]][self._forward[1]]
 
-        self._chars += 1
-        if val == '\n':
-            self._lines += 1
-            self._cols = 0
-        else:
-            self._cols += 1
+        if self._buffers[self._next_state.buffer_number] == None:
+            self._buffers[self._next_state.buffer_number] = self._read_buffer()
+
+        val = self._buffers[self._next_state.buffer_number][self._next_state.pos]
+
+        self._states.append(self._next_state)
+        s = self._next_state.move_next(val == '\n')
+        if s.buffer_number != self._next_state.buffer_number:  # next read will be on the other buffer
+            assert self._buffers[
+                s.buffer_number] == None, "Attempt to read over buffer (token too long)"
+        self._next_state = s
         return val
+
+    def retract(self, n=1):
+        if n > 0:
+            assert len(
+                self._states) > 0, "Retract attempted with no past states"
+            self._next_state = self._states.pop()
+            self.retract(n - 1)
 
     def emit(self, tag, value_or_func):
         text = ""
+        start = self._states[0]
+        end = self._states[-1]
 
-        if self._start[0] == self._forward[0]:
-            text = ''.join(self._buffers[self._start[0]
-                                         ][self._start[1]:self._forward[1]+1])
+        if start.buffer_number == end.buffer_number:
+            text = ''.join(self._buffers[start.buffer_number
+                                         ][start.pos:end.pos+1])
         else:
-            text = ''.join(self._buffers[self._start[0]][self._start[1]:] +
-                           self._buffers[self._forward[0]][:self._forward[1]+1])
+            text = ''.join(self._buffers[start.buffer_number][start.pos:] +
+                           self._buffers[end.buffer_number][:end.pos + 1])
 
-        # make sure the next _start isn't in the next buffer
-        # most cases would be handled by the else above, but there's
-        # the edgecase of the next _start being the beginning of the
-        # next buffer
-        # forward is now 1 behind the start because it's not been read yet
-        # on the next read() call, it will be the same as start
-        next_start = self._get_next_forward()
-        if next_start[0] != self._start[0]:
-            self._buffers[self._start[0]] = None
-        self._start = next_start
-        self._forward_behind_start = True
+        if self._next_state.buffer_number != start.buffer_number:  # old buffer won't be needed any longer
+            self._buffers[start.buffer_number] = None
 
-        span = Span(self._line_col_char_start[2],
-                    self._line_col_char_start[2] + len(text),
-                    self._line_col_char_start[0],
-                    self._line_col_char_start[1])
-        self._line_col_char_start = (self._lines, self._cols, self._chars)
+        self._states = []
+        span = Span(start.chars, end.chars+1, start.lines, start.cols)
 
         if callable(value_or_func):
             return Token(tag, value_or_func(text), text, span)

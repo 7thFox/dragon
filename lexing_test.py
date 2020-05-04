@@ -72,11 +72,45 @@ class LexingBufferTests(unittest.TestCase):
     def test_long_token_throws(self):
         length = 10000
         l = LexingBuffer(TextIOWrapper(BytesIO(("D" * length).encode())))
-        for n in range(0, length + 1):
-            if n >= _BUFFER_SIZE*2:  # 8192, reading the next
-                self.assertRaises(Exception, l.read)
-            else:
-                self.assertEqual(l.read(), "D")
+        for _ in range(0, _BUFFER_SIZE - 1):  # consume all but 1 char of buffer
+            l.read()
+        l.emit(TestTags.Test, None)
+        for _ in range(0, _BUFFER_SIZE):  # should still consume safely up to BUFFER_SIZE
+            l.read()
+
+        def unsafe_reads():
+            l.read()  # N + 1: could technically read this if we wanted, but that would add a lot of work/complexity to the buffer
+            l.read()  # N + 2: will be unable to safely read next buffer without overriding a buffer that's still in use
+
+        self.assertRaises(Exception, unsafe_reads)
+
+    def test_retract(self):
+        length = 1000
+        l = LexingBuffer(TextIOWrapper(BytesIO(("ABCDE" * length).encode())))
+
+        for _ in range(0, length):
+            # read 5, retract 4, emit
+            self.assertEqual(l.read(), "A")
+            self.assertEqual(l.read(), "B")
+            self.assertEqual(l.read(), "C")
+            self.assertEqual(l.read(), "D")
+            self.assertEqual(l.read(), "E")
+            l.retract(4)
+            self.assertEqual(l.emit(TestTags.Test, None).text, "A")
+
+            # re-read remaining 4, retract 1, emit
+            self.assertEqual(l.read(), "B")
+            self.assertEqual(l.read(), "C")
+            self.assertEqual(l.read(), "D")
+            self.assertEqual(l.read(), "E")
+            l.retract()
+            self.assertEqual(l.emit(TestTags.Test, None).text, "BCD")
+
+            # read final, emit
+            self.assertEqual(l.read(), "E")
+            self.assertEqual(l.emit(TestTags.Test, None).text, "E")
+
+        self.assertEqual(l.read(), EOF)
 
 
 if __name__ == '__main__':
